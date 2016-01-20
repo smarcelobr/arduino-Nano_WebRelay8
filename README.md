@@ -8,7 +8,7 @@ This is a modified version from "http://playground.arduino.cc/Code/NanoWebRelay8
  - Arduino Nano or compatible
  - Ethernet ENC28J60 module
  - 8 channel - Relay Module
- - and some minor things
+ - DC-DC step down module (to provide 3.3V for Ethernet ENC28J60 Module)
 
 ## Git basic instructions:
 
@@ -20,3 +20,4 @@ Update from Github:
   
 Commit to Github:
   $git push
+
