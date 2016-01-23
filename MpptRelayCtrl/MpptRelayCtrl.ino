@@ -105,6 +105,7 @@ Original comment (the same rights are applicable for this modified version):
 #include <UIPEthernet.h>
 #include <UIPServer.h>
 #include <UIPClient.h>
+#include <Metro.h>
 
 #ifdef DEBUGGING
 	#include <MemoryFree.h>
@@ -128,7 +129,8 @@ const int maxSize = 512; // that is enough for 8 relays + a bigger header
 
 // the get requests the application is listening to
 const char REQ_ABOUT[] = "/api/about";
-const char REQ_API[] = "/api/r";
+const char REQ_RELAY[] = "/api/r";
+const char REQ_MPPT[] = "/api/mppt";
 
 // Request parameters
 const char GET[]  = "GET";
@@ -285,15 +287,44 @@ const char VERSION[] = "{\"version\":\""_VERSION"\"}";
 // start the server on port 80
 EthernetServer server = EthernetServer(80);
 
-
 // *** Communication with EPSOLAR MPPT Solar Controller ***
 #define TRACER_DEVICE	0x01
 
 // SERIAL BUFFER
 #define SER_SIZE 	96
+const uint8_t MT5_CMD_STATUS[] PROGMEM = {0xEB,0x90,0xEB,0x90,0xEB,0x90,0x01,0xA0,0x00,0x6F,0x52,0x7F};
+/*            for (ij = 0; ij < 3; ij ++) {
+               Serial.write(0xEB); Serial.write(0x90);
+            }
+            Serial.write(0x01);    // Adresse
+            Serial.write(0xA0);    // Commande
+            Serial.write(0x00);    // Longueur de donnees
+            Serial.write(0x6F);    // Check sum
+            Serial.write(0x52);    // Check sum
+            Serial.write(0x7F);*/
 static uint8_t serbuf[SER_SIZE] = "";
 int serind;
+Metro mpptSerialMetro = Metro(10000);
 
+struct MPPT_STATUS {
+    uint16_t 
+      mbat, 
+      msol, 
+      mcon, 
+      modv, 
+      mbfv,
+      mcur;
+    uint8_t 
+      mlod, 
+      movl, 
+      mlsc, 
+      msoc, 
+      mbol, 
+      mbod, 
+      mful, 
+      mchg,
+      mtmp;
+} mppt_status;
 // 
 
 void setup() {
@@ -342,8 +373,10 @@ void loop() {
 						#endif
 						if (getData.equals(REQ_ABOUT)) {
 							client.println(VERSION);
-						} else if (getData.equals(REQ_API)) {
+						} else if (getData.equals(REQ_RELAY)) {
 							printRelayStatus(client);
+						} else if (getData.equals(REQ_MPPT)) {
+							printMpptStatus(client);
 						} else {
 							printHomePage(client);
 						}
@@ -370,6 +403,15 @@ void loop() {
 		} // end if client
 	} // end if server available
 
+      if (mpptSerialMetro.check()==1) {
+            // send a command to mppt to receive status
+            int ij;
+            for (ij = 0; ij < sizeof(MT5_CMD_STATUS); ij ++) {
+               int8_t myByte =  pgm_read_byte_near(&MT5_CMD_STATUS[0] + ij);
+               Serial.write(myByte);
+            }
+      }
+
       // ---------------------------------------------------------------
       // Traitement des caracteres recus sur le port serie
       // ---------------------------------------------------------------
@@ -390,7 +432,7 @@ void loop() {
 
 /**
  *
- * manda para a Serial uma string na memoria de programa.
+ * manda para a Ethernet uma string na memoria de programa.
  *
  */
 void printPrgMem(EthernetClient &client, const prog_char* msg) {
@@ -563,6 +605,23 @@ void printRelayStatus(EthernetClient &client) {
 }
 
 /**
+ * Returns a JSON with the current values of the mppt status to the client. The
+ * JSON will look like: {"r":[0,0,0,0,0,0,0,0]}
+ */
+void printMpptStatus(EthernetClient &client) {
+	client.print(MS_START);
+	int i = 0;
+	int lastRelay = numRelays-1;
+	for (i = 0; i < numRelays; i++) {
+		client.print(portStatus[i]);
+		if(i < lastRelay) {
+		  client.print(RS_SEP);
+		}
+	}
+	client.println(MS_END);
+}
+
+/**
  * Returns a message to the client.
  */
 void returnErr(EthernetClient &client, int rc) {
@@ -575,9 +634,60 @@ void returnErr(EthernetClient &client, int rc) {
  * Returns a header with the given http code to the client.
  */
 void returnHeader(EthernetClient &client, int httpCode) {
-	client.print(HD_START);
-	client.print(httpCode);
-	client.print(HD_END);
+      
+      mppt_status.mbat = (serbuf[10] << 8) | serbuf[9];
+      mppt_status.msol = (serbuf[12] << 8) | serbuf[11];
+      mppt_status.mcon = (serbuf[16] << 8) | serbuf[15];
+      mppt_status.modv = (serbuf[18] << 8) | serbuf[17];
+      mppt_status.mbfv = (serbuf[20] << 8) | serbuf[19];
+      mppt_status.mlod = serbuf[21];
+      mppt_status.movl = serbuf[22];
+      mppt_status.mlsc = serbuf[23];
+      mppt_status.msoc = serbuf[24];
+      mppt_status.mbol = serbuf[25];
+      mppt_status.mbod = serbuf[26];
+      mppt_status.mful = serbuf[27];
+      mppt_status.mchg = serbuf[28];
+      mppt_status.mtmp = serbuf[29];
+      mppt_status.mcur = (serbuf[31] << 8) | serbuf[30];
+
+      // battery voltage * 100
+      printPrgMem(client, PSTR("{\"batV\":"));      
+      client.print(mppt_status.mbat);
+      // panel fotovoltaico voltage * 100
+      printPrgMem(client, PSTR(",\"pvV\":"));      
+      client.print(mppt_status.msol);
+      // load current * 100
+      printPrgMem(client, PSTR(",\"loadA\":"));      
+      client.print(mppt_status.mcon);
+      // over discharge voltage * 100
+      printPrgMem(client, PSTR(",\"ovDisV\":"));      
+      client.print(mppt_status.modv);
+      // battery full voltage * 100
+      printPrgMem(client, PSTR(",\"batFullV\":"));      
+      client.print(mppt_status.mbfv);
+      // load on/off (0-off;1-on)
+      printPrgMem(client, PSTR(",\"loadON\":"));      
+      client.print(mppt_status.mlod);
+      // over load (0-no;1-yes)
+      printPrgMem(client, PSTR(",\"ovLoad\":"));      
+      client.print(mppt_status.movl);
+/*      // load short circuit
+      printPrgMem(client, PSTR(",\"loadShortCircuit\":"));      
+      client.print(mppt_status.mlsc);*/
+      // full indicador
+      printPrgMem(client, PSTR(",\"full\":"));      
+      client.print(mppt_status.mful);
+      // charging indicador
+      printPrgMem(client, PSTR(",\"chg\":"));      
+      client.print(mppt_status.mchg);
+      // chargind current * 100
+      printPrgMem(client, PSTR(",\"chgA\":"));      
+      client.print(mppt_status.mcur);
+      // temperature (Celsius + 30)
+      printPrgMem(client, PSTR(",\"temp\":"));      
+      client.print(mppt_status.mtmp);
+      client.write('}'); // end json message
 }
 
 /**
@@ -631,8 +741,7 @@ String getNextLine(EthernetClient &client) {
 
 
 /* ------------------------------------   S e n d _ T r a c e r _ C o m m a n d
- */
-#ifdef SEND_TRACER_COMMAND
+ 
 void Send_Tracer_Command(uint8_t command, uint8_t datalen) {
    int ij;
    uint16_t	crc;
@@ -683,7 +792,7 @@ void Send_Tracer_Command(uint8_t command, uint8_t datalen) {
    if (! VinOn) Serial.println();
 #endif
 }
-
+*/
 /* ----------------------------------------------------------------   C r c 1 6
  */
 uint16_t Crc16(uint8_t *buff, uint8_t len) {
@@ -711,4 +820,34 @@ uint16_t Crc16(uint8_t *buff, uint8_t len) {
    return result;
 }
 
-
+/* ----------------------------------------------   M e s u r e s _ T r a c e r
+   Si une sequence de mesures du regulateur est reconnue, l'enregistrer
+ */
+void Mesures_Tracer(void) {
+   // Detection de mesure, si ok la sauvegarder
+   //              5             10             15             20             25             30                36
+   // EB 90 EB 90 EB 90 00 A0 18 DB 04 0F 00 00 00 09 00 4B 04 C8 05 01 00 00 25 00 00 00 00 2B 00 00 00 92 74 7F
+   if (  (serbuf[0] == 0xEB) && (serbuf[1] == 0x90) 
+      && (serbuf[2] == 0xEB) && (serbuf[3] == 0x90)
+      && (serbuf[4] == 0xEB) && (serbuf[5] == 0x90)) {
+      mppt_status.mbat = (serbuf[10] << 8) | serbuf[9];
+      mppt_status.msol = (serbuf[12] << 8) | serbuf[11];
+      mppt_status.mcon = (serbuf[16] << 8) | serbuf[15];
+      mppt_status.modv = (serbuf[18] << 8) | serbuf[17];
+      mppt_status.mbfv = (serbuf[20] << 8) | serbuf[19];
+      mppt_status.mlod = serbuf[21];
+      mppt_status.movl = serbuf[22];
+      mppt_status.mlsc = serbuf[23];
+      mppt_status.msoc = serbuf[24];
+      mppt_status.mbol = serbuf[25];
+      mppt_status.mbod = serbuf[26];
+      mppt_status.mful = serbuf[27];
+      mppt_status.mchg = serbuf[28];
+      mppt_status.mtmp = serbuf[29];
+      mppt_status.mcur = (serbuf[31] << 8) | serbuf[30];
+      // serbuf[32] reserve
+      // serbuf[33] checksum
+      // serbuf[34] checksum
+      // serbuf[35] 0x7F
+   }
+}
