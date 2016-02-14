@@ -1,3 +1,13 @@
+#include <Arduino.h>
+#include <EEPROM.h>
+#include <UIPEthernet.h>
+#include <UIPServer.h>
+#include <UIPClient.h>
+#include <ethernet_comp.h>
+#include <SmcfJsonDecoder.h>
+#include <WebMVC.h>
+#include "WebRelayService.h"
+
 /*
 MODIFIED by Sergio M C Figueiredo
 
@@ -89,66 +99,38 @@ Original comment (the same rights are applicable for this modified version):
  * 		 numRelays. Change it if you have more relays.
  * - 5 = The application only supports the values 0 for off, 1 for on and 2 to 
  * 		 invert the status, everything else will not work!
+ * - 6 = Json parsing fail on request content
  *
  * created 04 Jan 2015 - by Iwan Zarembo <iwan@zarembo.de>
  */
 
 // the debug flag during development
 // decomment to enable debugging statements
-//#define DEBUGGING 0;
+#define DEBUGGING;
 
-#define _VERSION "0.3"
-
-#include <Arduino.h>
-#include <UIPEthernet.h>
-#include <UIPServer.h>
-#include <UIPClient.h>
-
-#ifdef DEBUGGING
-	#include <MemoryFree.h>
-#endif
+#define _VERSION "0.4"
 
 /*** The configuration of the application ***/
-// Change the configuration for your needs
-const uint8_t mac[6] = { 0xDE, 0xAE, 0xBD, 0x12, 0xFE, 0xED };
-const IPAddress myIP(192, 168, 1, 20);
-
-// Number of relays on board, max 9 are supported!
-const int numRelays = 8;
-// Output ports for relays, change it if you connected other pins, must be adjusted if number of relays changed
-int outputPorts[] = { 2, 3, 4, 5, 6, 7, 8, 9 };
-// this is for performance, must be adjusted if number of relays changed
-boolean portStatus[] = { false, false, false, false, false, false, false, false };
-
-/****** a little bit of security *****/
-// max request size, arduino cannot handle big requests so set the max you really plan to process
-const int maxSize = 512; // that is enough for 8 relays + a bigger header
+int relayPins[NUM_RELAYS] PROGMEM = {2,3,4,5,6,7,8,9};
+RelayService relayService(relayPins); // pin number each relay
 
 // the get requests the application is listening to
-const char REQ_ABOUT[] = "/api/about";
-const char REQ_API[] = "/api/r";
+const char RESOURCE_ABOUT[] PROGMEM = "/api/about ";
+const char RESOURCE_STATE[] PROGMEM = "/api/r ";
+const char RESOURCE_NAME[] PROGMEM = "/api/n ";
+const char RESOURCE_HOME_PAGE[] PROGMEM = "/ ";
 
-// Request parameters
-const char GET[]  = "GET";
-const char POST[] = "POST";
-
-// http codes
-const int RC_ERR = 500;
-const int RC_OK  = 200;
-
-// supported relay status
-const int R_OFF = 0;
-const int R_ON  = 1;
-const int R_INV = 2;
+ /* - 3 = The command must be at least 3 chars long! e.g. 0=1*/
+#define ERROR_INVALID_COMMAND_SIZE 3
 
 /* ************ internal constants *************/
 // post data tokenizer
-const char TOK[] = "=&";
+//const char TOK[] = "=&";
 
 // new line
-const char NL = '\n';
+//const char NL = '\n';
 // carriage return
-const char CR = '\r';
+//const char CR = '\r';
 
 // JSON RESPONSES
 // response of relay status, json start
@@ -163,12 +145,10 @@ const char RS_ERR_START[] = "{\"e\":";
 // response of the error JSON end
 const char RS_ERR_END = '}';
 
-// HEADERS RESPONSES
-const char HD_START[] = "HTTP/1.1 ";
-const char HD_END[] = " \nContent-Type: text/html\nConnection: close\n\n";
+const char VIEW_ABOUT[] PROGMEM = "{\"version\":\""_VERSION"\"}";
 
 // RESPOSTA HTML
-const char PRGM_HOME_PAGE[] PROGMEM = 
+const char VIEW_HOME_PAGE[] PROGMEM = 
 "<!DOCTYPE html>\n"
 "<html lang=\"en\">\n"
 "<head>\n"
@@ -180,14 +160,15 @@ const char PRGM_HOME_PAGE[] PROGMEM =
   "body{background-color:black;}\n"
   ".content{\n"
    "margin:auto;\n"
-   "width:98%\n"
+   "width:99%\n"
   "}\n"
-  "ul{list-style-type:none;}\n"
+  "ul{list-style-type:none;margin:0;padding:0}\n"
   "li{\n"
    "float:left;\n"
-   "width:140px;\n"
+   "width:43%;\n"
+   "min-width:130px;\n"
+   "max-width:160px;\n"
    "height:60px;\n"
-   "max-width:80%;\n"
    "border:1px solid ligthslategray;\n"
    "color:white;\n"
    "font-weight:bold;\n"
@@ -213,7 +194,7 @@ const char PRGM_HOME_PAGE[] PROGMEM =
 "var rlnm=['COZINHA','VARANDA','TV','TGU','INT1','INT2','INT3','INT4'];\n"
 
 "var onrs=function(){\n"
-   "console.log(this);\n"
+//   "console.log(this);\n"
     "if(4!=this.readyState){\n"
        "return;\n"
     "}\n"
@@ -257,7 +238,7 @@ const char PRGM_HOME_PAGE[] PROGMEM =
 "function r_st(id,st){\n"
   "var li=d.getElementById(\"r\"+id);\n"
   "if (li){li.className=\"ld\";}\n"
-  "ajax('POST','/',id+'=2');\n"
+  "ajax('POST','/api/r','{\"'+id+'\":2}');\n"
 "}\n"
 
 "function r_get() {\n"
@@ -268,7 +249,7 @@ const char PRGM_HOME_PAGE[] PROGMEM =
 "<div class=\"content\">\n"
   "<ul id=\"r\">\n"
   "</ul>\n"
-  "<hr/><p class=\"small\">WebRelay8 "_VERSION"</p>\n"
+  "<hr/><p class=\"small\">Relenet "_VERSION"</p>\n"
 "</div>\n"
 
 "<script>\n"
@@ -278,7 +259,25 @@ const char PRGM_HOME_PAGE[] PROGMEM =
 "</body>\n"
 "</html>\n";
 
-const char VERSION[] = "{\"version\":\""_VERSION"\"}";
+class RelayStateChangeCtrl: public WebController {
+public:
+  void execute(WebDispatcher &webDispatcher, WebRequest &request);
+} relayStateChangeCtrl;
+
+class RelayNameChangeCtrl: public WebController {
+public:
+  void execute(WebDispatcher &webDispatcher, WebRequest &request);  
+} relayNameChangeCtrl;
+
+RedirectToViewCtrl redirectToHTMLCtrl(CONTENT_TYPE_HTML),redirectToJSONCtrl(CONTENT_TYPE_JSON);
+
+#define NUM_ROUTES 4
+WebRoute routes[ NUM_ROUTES ] PROGMEM = {
+  {RESOURCE_ABOUT,&redirectToJSONCtrl,VIEW_ABOUT},
+  {RESOURCE_STATE,&relayStateChangeCtrl,NULL},
+  {RESOURCE_NAME,&relayNameChangeCtrl,NULL},
+  {RESOURCE_HOME_PAGE,&redirectToHTMLCtrl,VIEW_HOME_PAGE}
+};
 
 // start the server on port 80
 EthernetServer server = EthernetServer(80);
@@ -286,233 +285,183 @@ EthernetServer server = EthernetServer(80);
 void setup() {
 	#ifdef DEBUGGING
 		Serial.begin(9600);
+
+                Serial.print(F("\nEEPROM:"));
+                for (int i=0; i<128; i++) {
+                    if (!(i%16)==0) {
+                      Serial.print(" ");
+                    } else {
+                      Serial.println();
+                    }
+                    Serial.print(EEPROM.read(i));
+                }
+                
+                // relay names
+                char dest[10];
+                for (uint8_t i=0; i<NUM_RELAYS; i++) {
+                  relayService.getName(i,dest);
+                  Serial.print(F("\nNAME["));
+                  Serial.print(i);
+                  Serial.print(F("]: "));
+                  Serial.println(dest);                  
+                  Serial.println(EE_checksum(12+(i*11),10));
+                }
 	#endif
 	
-	// all pins will be turned off
-	for (int i = 0; i < numRelays; i = i + 1) {
-		pinMode(outputPorts[i], OUTPUT);
-		digitalWrite(outputPorts[i], LOW);
-	}
-	
-	Ethernet.begin(mac, myIP);
+        // inicia random com algo bem aleatorio
+        randomSeed(analogRead(7));
+        
+        uint8_t ip[4], mac[6];
+        if (!EE_getMAC(mac)) {
+          // sorteia um MAC novo para o endereco e grava na EEPROM
+          for (int i=0;i<6;i++) {
+             long num = random(256*255);
+             Serial.print(num);
+             Serial.print(F(";"));
+             mac[i]=(uint8_t)num;
+           }
+           Serial.println();
+          // grava na eeprom
+          //EE_saveMAC(mac);
+        }
+	if (!EE_getIP(ip)) {;
+          // Change the configuration for your needs
+          ip[0]=192;ip[1]=168;ip[2]=1;ip[3]=20;
+        }
+        IPAddress myIP(ip[0],ip[1],ip[2],ip[3]);        
+        Ethernet.begin(mac, myIP);
 	#ifdef DEBUGGING
-		Serial.print("Local IP: ");
+		Serial.print(F("Local IP: "));
 		Serial.println(Ethernet.localIP());
+                Serial.print(F("     MAC: "));
+                for (int i=0;i<6;i++) {
+                  if (i>0) Serial.print(F(":"));
+                  Serial.print(mac[i]);
+                }
+                Serial.println();
 	#endif
 	server.begin();
 }
 
 void loop() {
+  processWebRequests();
+//  processSerialRequests(); 
+}
 
-	if (EthernetClient client = server.available()) {
-		if (client) {
-			size_t size;
-			if((size = client.available()) > 0) {
-				// check the the data is not too big
-				if(size > maxSize) {
-					returnHeader(client, RC_ERR);
-					returnErr(client, 1);
-				}
-				String buffer = "";
-				char c;
-				#ifdef DEBUGGING
-					Serial.println("New client request");
-				#endif
-				// read all data
-				while (client.connected() && client.available()) {
-					buffer = getNextLine(client);
-					if (buffer.startsWith(GET)) {
-						returnHeader(client, RC_OK);
-						String getData = buffer.substring(4, buffer.length() - 9);
-						#ifdef DEBUGGING
-							Serial.print("Get Data: "); Serial.println(getData);
-						#endif
-						if (getData.equals(REQ_ABOUT)) {
-							client.println(VERSION);
-						} else if (getData.equals(REQ_API)) {
-							printRelayStatus(client);
-						} else {
-							printHomePage(client);
-						}
-						break;
-					} else if (buffer.startsWith(POST)) {
-						analyzePostData(client);
-						break;
-					} else {
-						// only get and post are supported
-						returnHeader(client, RC_ERR);
-						returnErr(client, 2);
-					}
-				} // end while
-	
-				#ifdef DEBUGGING
-					Serial.println("Stopping the client");
-				#endif
-				delay(1);
-				client.stop();
-				#ifdef DEBUGGING
-					//Serial.print("freeMemory()="); Serial.println(freeMemory());
-				#endif
-			} // end if request size bigger than 0
-		} // end if client
-	} // end if server available
+void processWebRequests() {
+  /* Crio o WebDispatcher local a este funcao para uso racional de memoria. Assim, todo o 
+        MVC eh criado na memoria da pilha e liberado ao final desta funcao. */
+  WebDispatcher webDispatcher(server);
+  webDispatcher.setRoutes(routes,NUM_ROUTES);
+  webDispatcher.process();
 } // end loop
 
-
 /**
- *
- * manda para a Serial uma string na memoria de programa.
+ * callback for jsonparse when changename.
+ * Se retornar qualquer coisa diferente de 0, para o processamento e retorna na hora.
  *
  */
-void printPrgMem(EthernetClient &client, const prog_char* msg) {
-#ifdef DEBUGGING
-  Serial.print("PrintPrgMem!");
-#endif
-  char myChar;
-  int len = strlen_P(msg);
-  for (int k = 0; k < len; k++)
-  {
-    myChar =  pgm_read_byte_near(msg + k);
-    client.write(myChar);
+int jsonDecoderChangeStatus(int jsonElementType, void* value,void*context) {
+  ChangeStatusRequest &chgStatusReq = *((ChangeStatusRequest*)context);
+  switch (jsonElementType) {
+    case JSON_ELEMENT_OBJECT_KEY: {
+	char *key = (char*)value; // alias to point of char.
+	if (strlen(key)!=1) {
+		return ERROR_INVALID_RELAY_ID; 
+	}
+        chgStatusReq.numRelay=(key[0]-'0');
+        break;
+    }
+    case JSON_ELEMENT_NUMBER_LONG: {
+	chgStatusReq.newOnOffStat=*((int*)value);
+        return relayService.changeStatus(chgStatusReq);
+	break;
+    }
+    default:
+       chgStatusReq.numRelay=100; // force to a invalid num relay
   }
-#ifdef DEBUGGING
-  Serial.print("PrintPrgMem.");
-#endif
+
+  return JSON_ERR_NO_ERROR;
 }
 
-/**
- * Returns a HTML.
- */
-void printHomePage(EthernetClient &client) {
-  printPrgMem(client, &PRGM_HOME_PAGE[0]);
-}
-
-/**
- * It will get the data in case of a post request, by reading the last line.
- */
-String getPostData(EthernetClient &client) {
-	#ifdef DEBUGGING
-		Serial.println("Reading post data from client.");
-	#endif
-	char c;
-	while (client.connected() && client.available())  {
-		c = client.read();
-		// ignore all \r characters
-		if (c != CR) {
-			// not read until you have a line break
-			if (c == NL) {
-				// is the next char a carriage return or a line break?
-				c = client.read();
-				if (c == CR) {
-					// then ignore it and read the next character
-					c = client.read();
-				}
-				if (c == NL) {
-					// read the line with the post data
-					return getNextLine(client);
-				}
-			} // end if C == NL
-		} // end c != CR
-	} // end while
-	return "";
-}
-
-/**
- * Performs the change on the relay itself.
- */
-bool processRelayChange(int relay, int onOffStat) {
-	#ifdef DEBUGGING
-		Serial.print("The target status of the relay "); Serial.print(relay);
-		Serial.print(" is: "); Serial.println(onOffStat);
-	#endif
-	if(onOffStat == R_OFF) {
-		// only turn something of if it is turn on, otherwise ignore it.
-		if(portStatus[relay] != false) {
-			// turn it off
-			digitalWrite(outputPorts[relay], LOW);
-			portStatus[relay] = false;
-		}
-	} else if(onOffStat == R_ON) {
-		// only turn something of if it is turn on, otherwise ignore it.
-		if(portStatus[relay] != true) {
-			// turn it off
-			digitalWrite(outputPorts[relay], HIGH);
-			portStatus[relay] = true;
-		}
-	} else if(onOffStat == R_INV) {
-		bool target = !portStatus[relay];
-		#ifdef DEBUGGING
-			Serial.print("Curr status is:"); Serial.println(portStatus[relay]);
-			Serial.print("Target status is:"); Serial.println(target);
-		#endif
-		digitalWrite(outputPorts[relay], target ? HIGH : LOW);
-		portStatus[relay] = target;
+void sendJsonViaWeb(WebDispatcher &webDispatcher, WebRequest &request, uint8_t err, void (*sendJson_fn) (EthernetClient&)) {
+	request.response.contentType_P=CONTENT_TYPE_JSON;
+	if (err) {
+		request.response.httpStatus=RC_BAD_REQ;
 	} else {
-		return false;
-	} // end switching a relay
-	return true;
+		request.response.httpStatus=RC_OK;
+	}
+	webDispatcher.sendHeader(request);
+	sendJson_fn(request.client);
+}
+
+void RelayStateChangeCtrl::execute(WebDispatcher &webDispatcher, WebRequest &request) {
+#ifdef DEBUGGING
+	Serial.println(F("StCtrl"));
+#endif
+       	int err=0;
+        if (request.method==METHOD_POST) {
+	        char jsonStr[50];
+		if (webDispatcher.getNextLine(request.client,jsonStr,50)) {
+			#ifdef DEBUGGING
+				Serial.print(F("Processing relays: ")); Serial.println(jsonStr);
+			#endif
+	
+			ChangeStatusRequest chgStatusReq;
+			SmcfJsonDecoder jsonDecoder;
+			err=jsonDecoder.decode(jsonStr, jsonDecoderChangeStatus, &chgStatusReq);
+		} else {
+			err=3;//todo: corrigir codigo de erro
+		}
+	} // if POST
+	sendJsonViaWeb(webDispatcher, request,err,printJsonRelayStatus);
 }
 
 /**
- * Performs the status change on the relais. The POST data must follow the 
- * pattern: relay number = 0 or 1 or 2 => e.g. 0=1&1=2&2=1&3=0&4=1&5=1&6=1&7=1
- *   -> The relay number can only be an integer between 0 and the constant numRelays-1
- *   -> 0 turns the relay off
- *   -> 1 turns the relay on
- *   -> 2 changes the status of the relay. So a turned off relay would be switched on and the other way around.
- * The result of this method can be:
- * 	1. A HTTP 500 error if something went wrong processing the command.
- * 	2. A JSON String as you would get when sending a simple GET request.
+ * callback for jsonparse when changename.
+ * Se retornar qualquer coisa diferente de 0, para o processamento e retorna na hora.
+ *
  */
-void analyzePostData(EthernetClient &client) {
-	String command = getPostData(client);
-	
-	#ifdef DEBUGGING
-		Serial.print("Processing relays: "); Serial.println(command);
-	#endif
-	
-	int idx;
-	while ( (idx = command.indexOf("&")) != -1 || command.length() == 3) {
-		String param = command.substring(0, idx);
-		if (param.length() != 3) {
-			returnHeader(client, RC_ERR);
-			returnErr(client, 3);
-			break;
-		} else {
-			// get the relay number, this might fail, if not a number.
-			int relay = param.charAt(0) - '0';
-			#ifdef DEBUGGING
-				Serial.print("Found index: "); Serial.println(idx);
-				Serial.print("Current substring: "); Serial.println(param);
-				Serial.print("Found Relay: "); Serial.println(relay);
-			#endif
-			// we only have 8 relays, so the number can only be between 0 and 7.
-			if (relay < numRelays && relay >= 0) {
-				int onOff = param.charAt(2) - '0';
-				bool ok = processRelayChange(relay, onOff);
-				if(!ok) {
-					// stop processing, an error occurred!
-					returnHeader(client, RC_ERR);
-					returnErr(client, 5);
-					return;
-				}
-			} // end relay check
-			// make it smaller
-			if (idx == -1) {
-				// stop the loop as soon the last part without end is done
-				break;
-			}
-			command = command.substring(idx + 1, command.length());
-			#ifdef DEBUGGING
-				Serial.print("Left Command: ");
-				Serial.println(command);
-			#endif
-		} // end if param.length < 3
-	} // end while loop
+int jsonDecoderChangeName(int jsonElementType, void* value,void*context) {
+  ChangeNameRequest &chgNameReq = *((ChangeNameRequest*)context);
+  switch (jsonElementType) {
+    case JSON_ELEMENT_OBJECT_KEY: {
+	char *key = (char*)value; // alias to point of char.
+	if (strlen(key)!=1) {
+		return ERROR_INVALID_RELAY_ID; 
+	}
+        chgNameReq.numRelay=(key[0]-'0');
+        break;
+    }
+    case JSON_ELEMENT_STRING: {
+	chgNameReq.newName=(char*)value;
+        return relayService.changeName(chgNameReq);
+	break;
+    }
+    default:
+       chgNameReq.numRelay=100; // force to a invalid num relay
+  }
 
-	// return the final status of all relays
-        returnHeader(client, RC_OK);
-	printRelayStatus(client);
+  return JSON_ERR_NO_ERROR;
+}
+
+void RelayNameChangeCtrl::execute(WebDispatcher &webDispatcher, WebRequest &request) {
+#ifdef DEBUGGING
+	Serial.println(F("NameCtrl"));
+#endif
+        int err=0;
+	if (request.method==METHOD_POST) {	
+		char jsonStr[50];
+		if(webDispatcher.getNextLine(request.client,jsonStr,sizeof(jsonStr))) {
+			#ifdef DEBUGGING
+				Serial.print(F("ChgName: ")); Serial.println(jsonStr);
+			#endif
+ 			ChangeNameRequest chgNameReq;
+			SmcfJsonDecoder jsonDecoder;
+			int err=jsonDecoder.decode(jsonStr, jsonDecoderChangeName, &chgNameReq);
+		} else err=3; // não veio os dados do post. todo: corrigir o codigo de erro
+	}
+	sendJsonViaWeb(webDispatcher,request,err,printJsonRelayNames);
 }
 
 /**
@@ -520,83 +469,45 @@ void analyzePostData(EthernetClient &client) {
  * JSON will look like: {"r":[0,0,0,0,0,0,0,0]}
  * This one means all releays are turned off.
  */
-void printRelayStatus(EthernetClient &client) {
+void printJsonRelayStatus(EthernetClient &client) {
+  #ifdef DEBUGGING
+    Serial.print(F("stat..."));
+  #endif
 	client.print(RS_START);
-	int i = 0;
-	int lastRelay = numRelays-1;
-	for (i = 0; i < numRelays; i++) {
-		client.print(portStatus[i]);
-		if(i < lastRelay) {
-		  client.print(RS_SEP);
+	for (int i = 0; i < NUM_RELAYS; i++) {
+              #ifdef DEBUGGING
+                Serial.print(F("-"));
+              #endif
+		if (i!=0) {
+			client.print(RS_SEP);
 		}
+		client.print(relayService.getStatus(i));
 	}
 	client.println(RS_END);
 }
 
 /**
- * Returns a message to the client.
+ * Returns a JSON with the current values of the name of relays to the client. The
+ * JSON will look like: ["COZINHA","VARANDA","TUG","QUARTO 1","QUARTO 2","SALA ESTAR","SALA JANTA","QUARTO 3"]
+ * This one means all releays are turned off.
  */
-void returnErr(EthernetClient &client, int rc) {
-	client.print(RS_ERR_START);
-	client.print(rc);
-	client.println(RS_ERR_END);
+void printJsonRelayNames(EthernetClient &client) {
+  #ifdef DEBUGGING
+    Serial.print(F("names..."));
+  #endif
+	client.print(F("["));
+	for (uint8_t i = 0; i < NUM_RELAYS; i++) {
+              #ifdef DEBUGGING
+                Serial.print(F("-"));
+              #endif
+		if (i!=0) {
+			client.print(RS_SEP);
+		}
+		char dest[10];
+		relayService.getName(i,dest);
+		client.print('"');
+		client.print(dest);
+		client.print('"');
+	}
+	client.println(F("]"));
 }
-
-/**
- * Returns a header with the given http code to the client.
- */
-void returnHeader(EthernetClient &client, int httpCode) {
-	client.print(HD_START);
-	client.print(httpCode);
-	client.print(HD_END);
-}
-
-/**
- * Reads the next line from the client.
- * Sample POST:
- * POST / HTTP/1.1
- * Host: 192.168.178.22
- * User-Agent: Mozilla/5.0 (Windows NT 6.1; WOW64; rv:33.0) Gecko/20100101 Firefox/33.0
- * Accept: text/html,application/xhtml+xml,application/xml;q=0.9,* /*;q=0.8
- * Accept-Language: de
- * Accept-Encoding: gzip, deflate
- * DNT: 1
- * Content-Type: text/xml; charset=UTF-8
- * Content-Length: 4
- * Connection: keep-alive
- * Pragma: no-cache
- * Cache-Control: no-cache
- *
- * 1=1&2=0
- * end -----------------------
- *
- * Sample GET:
- * GET /?1=0 HTTP/1.1
- * Host: 192.168.178.22
- * User-Agent: Mozilla/5.0 (Windows NT 6.1; WOW64; rv:33.0) Gecko/20100101 Firefox/33.0
- * Accept: text/html,application/xhtml+xml,application/xml;q=0.9,* /*;q=0.8
- * Accept-Language: de
- * Accept-Encoding: gzip, deflate
- * DNT: 1
- * Connection: keep-alive
- * end -----------------------
- */
-String getNextLine(EthernetClient &client) {
-	char c;
-	String buffer;
-	while (client.connected() && client.available()) {
-		c = client.read();
-		// ignore all \r characters
-		if (c != CR) {
-			// not read until you have a line break
-			if (c == NL) {
-				// every entry in in a certain line
-				return buffer;
-			} else {
-				buffer += c;
-			}
-		} // end c != CR
-	} // end while
-	return buffer;
-}
-

@@ -99,7 +99,7 @@ Original comment (the same rights are applicable for this modified version):
 // decomment to enable debugging statements
 //#define DEBUGGING 0;
 
-#define _VERSION "0.3"
+#define _VERSION "0.4"
 
 #include <Arduino.h>
 #include <UIPEthernet.h>
@@ -184,21 +184,22 @@ const char PRGM_HOME_PAGE[] PROGMEM =
   "body{background-color:black;}\n"
   ".content{\n"
    "margin:auto;\n"
-   "width:98%\n"
+   "width:99%\n"
   "}\n"
-  "ul{list-style-type:none;}\n"
+  "ul{list-style-type:none;margin:0;padding:0}\n"
   "li{\n"
    "float:left;\n"
-   "width:140px;\n"
+   "width:43%;\n"
+   "min-width:130px;\n"
+   "max-width:160px;\n"
    "height:60px;\n"
-   "max-width:80%;\n"
    "border:1px solid ligthslategray;\n"
    "color:white;\n"
    "font-weight:bold;\n"
    "margin:0.3em 0.3em;\n"
-   "padding:5px;\n"
+   "padding:5px\n"
   "}\n"
-  "hr{clear:left;}\n"
+  "hr{clear:left}\n"
   "button{display:block;margin:1em;border:1px solid lightslategray;font-weight:bold;font-family:\"Arial\"}\n"
   ".on{background-color:darkorange}\n"
   ".off{background-color:darkblue}\n"
@@ -206,7 +207,7 @@ const char PRGM_HOME_PAGE[] PROGMEM =
   ".fail{background-color:darkred}\n"
   ".small{\n"
    "font-size:x-small;\n"
-   "color:gray;\n"
+   "color:gray\n"
   "}\n"
 "</style>\n"
 "</head>\n"
@@ -609,48 +610,6 @@ void printRelayStatus(EthernetClient &client) {
  * JSON will look like: {"r":[0,0,0,0,0,0,0,0]}
  */
 void printMpptStatus(EthernetClient &client) {
-	client.print(MS_START);
-	int i = 0;
-	int lastRelay = numRelays-1;
-	for (i = 0; i < numRelays; i++) {
-		client.print(portStatus[i]);
-		if(i < lastRelay) {
-		  client.print(RS_SEP);
-		}
-	}
-	client.println(MS_END);
-}
-
-/**
- * Returns a message to the client.
- */
-void returnErr(EthernetClient &client, int rc) {
-	client.print(RS_ERR_START);
-	client.print(rc);
-	client.println(RS_ERR_END);
-}
-
-/**
- * Returns a header with the given http code to the client.
- */
-void returnHeader(EthernetClient &client, int httpCode) {
-      
-      mppt_status.mbat = (serbuf[10] << 8) | serbuf[9];
-      mppt_status.msol = (serbuf[12] << 8) | serbuf[11];
-      mppt_status.mcon = (serbuf[16] << 8) | serbuf[15];
-      mppt_status.modv = (serbuf[18] << 8) | serbuf[17];
-      mppt_status.mbfv = (serbuf[20] << 8) | serbuf[19];
-      mppt_status.mlod = serbuf[21];
-      mppt_status.movl = serbuf[22];
-      mppt_status.mlsc = serbuf[23];
-      mppt_status.msoc = serbuf[24];
-      mppt_status.mbol = serbuf[25];
-      mppt_status.mbod = serbuf[26];
-      mppt_status.mful = serbuf[27];
-      mppt_status.mchg = serbuf[28];
-      mppt_status.mtmp = serbuf[29];
-      mppt_status.mcur = (serbuf[31] << 8) | serbuf[30];
-
       // battery voltage * 100
       printPrgMem(client, PSTR("{\"batV\":"));      
       client.print(mppt_status.mbat);
@@ -690,6 +649,23 @@ void returnHeader(EthernetClient &client, int httpCode) {
       client.write('}'); // end json message
 }
 
+/**
+ * Returns a message to the client.
+ */
+void returnErr(EthernetClient &client, int rc) {
+	client.print(RS_ERR_START);
+	client.print(rc);
+	client.println(RS_ERR_END);
+}
+
+/**
+ * Returns a header with the given http code to the client.
+ */
+void returnHeader(EthernetClient &client, int httpCode) {
+	client.print(HD_START);
+	client.print(httpCode);
+	client.print(HD_END);
+}
 /**
  * Reads the next line from the client.
  * Sample POST:
