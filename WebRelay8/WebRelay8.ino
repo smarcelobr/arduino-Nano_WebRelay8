@@ -115,49 +115,25 @@ int relayPins[NUM_RELAYS] PROGMEM = {2,3,4,5,6,7,8,9};
 RelayService relayService(relayPins); // pin number each relay
 
 // the get requests the application is listening to
-const char RESOURCE_ABOUT[] PROGMEM = "/api/about ";
+const char RESOURCE_ABOUT[] PROGMEM = "/api/v ";
 const char RESOURCE_STATE[] PROGMEM = "/api/r ";
 const char RESOURCE_NAME[] PROGMEM = "/api/n ";
 const char RESOURCE_HOME_PAGE[] PROGMEM = "/ ";
 
- /* - 3 = The command must be at least 3 chars long! e.g. 0=1*/
-#define ERROR_INVALID_COMMAND_SIZE 3
-
 /* ************ internal constants *************/
-// post data tokenizer
-//const char TOK[] = "=&";
-
-// new line
-//const char NL = '\n';
-// carriage return
-//const char CR = '\r';
-
-// JSON RESPONSES
-// response of relay status, json start
-const char RS_START[] = "{\"r\":[";
-// response of relay status, json end
-const char RS_END[] = "]}";
-// response of relay status, json array separator;
-const char RS_SEP = ',';
-
-// response of the error JSON start
-const char RS_ERR_START[] = "{\"e\":";
-// response of the error JSON end
-const char RS_ERR_END = '}';
-
 const char VIEW_ABOUT[] PROGMEM = "{\"version\":\""_VERSION"\"}";
 
 // RESPOSTA HTML
 const char VIEW_HOME_PAGE[] PROGMEM = 
 "<!DOCTYPE html>\n"
-"<html lang=\"en\">\n"
-"<head>\n"
- "<meta charset=\"utf-8\"/>\n"
- "<meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\"/>\n"
- "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>\n"
- "<title>RELENET</title>\n"
- "<style>\n"
-  "body{background-color:black;}\n"
+"<html lang=\"en\">"
+"<head>"
+ "<meta charset=\"utf-8\"/>"
+ "<meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\"/>"
+ "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"/>"
+ "<title>RELENET</title>"
+ "<style>"
+  "body{background-color:black;}"
   ".content{\n"
    "margin:auto;\n"
    "width:99%\n"
@@ -189,10 +165,15 @@ const char VIEW_HOME_PAGE[] PROGMEM =
 "</head>\n"
 
 "<body>\n"
+
+"<div class=\"content\">\n"
+  "<ul id=\"r\">\n"
+  "</ul>\n"
+  "<hr/><p class=\"small\">Relenet "_VERSION"</p>\n"
+"</div>\n"
+
 "<script>\n"
 "var d=document;\n"
-"var rlnm=['COZINHA','VARANDA','TV','TGU','INT1','INT2','INT3','INT4'];\n"
-
 "var onrs=function(){\n"
 //   "console.log(this);\n"
     "if(4!=this.readyState){\n"
@@ -202,28 +183,28 @@ const char VIEW_HOME_PAGE[] PROGMEM =
        "var li=d.querySelector(\".ld\");\n"
        "li.className=\"fail\";\n"
        "return;\n"
-    "}\n"
+    "}"
     "procResp(this.response);\n"
-  "};\n"
+  "};"
   
 "function procResp(resp){\n"
    "var ul=d.getElementById(\"r\");\n"
    "var rls=JSON.parse(resp);\n"
-   "for (var i=0;i<rls.r.length;i++) (function(rl,i){\n"
-     "var li=d.getElementById(\"r\"+i);\n"
-     "if (!li){\n"
+   "for (var i=0;i<rls.length;i++) (function(rl){\n"
+     "var li=d.getElementById(\"r\"+rl.id);\n"
+     "if(!li){\n"
        "var btn=d.createElement(\"BUTTON\");\n"
        "btn.type=\"button\";\n"
-       "btn.onclick=function(){r_st(i,(rl[i]^1));};\n"
+       "btn.onclick=function(){r_st(rl.id,(rl.s^1));};\n"
        "li=d.createElement(\"LI\");\n"
        "ul.appendChild(li);\n"
-       "li.id=\"r\"+i;\n"
-       "li.appendChild(d.createTextNode(rlnm[i]));\n"
+       "li.id=\"r\"+rl.id;\n"
+       "li.appendChild(d.createTextNode(rl.n));\n"
        "li.appendChild(btn);\n"
      "}\n"
-     "li.className=(rl[i]&1)?\"on\":\"off\";\n"
-     "li.querySelector(\"button\").textContent=(rl[i]&1)?\"ON\":\"OFF\";\n"
-   "}(rls.r,i));\n"
+     "li.className=(rl.s&1)?\"on\":\"off\";\n"
+     "li.querySelector(\"button\").textContent=(rl.s&1)?\"ON\":\"OFF\";\n"
+   "}(rls[i]));\n"
 "}\n"
 
 "function ajax(m,a,d){\n"
@@ -231,7 +212,7 @@ const char VIEW_HOME_PAGE[] PROGMEM =
   "rqp.open(m,a,true);\n"
   "rqp.setRequestHeader('Content-Type','application/json;charset=UTF-8');\n"
   "rqp.onreadystatechange=onrs;\n"
-  "setTimeout(function(){rqp.abort()},20000);\n"
+  "setTimeout(function(){rqp.abort()},10000);\n"
   "rqp.send(d);\n"
 "}\n"
 
@@ -241,19 +222,7 @@ const char VIEW_HOME_PAGE[] PROGMEM =
   "ajax('POST','/api/r','{\"'+id+'\":2}');\n"
 "}\n"
 
-"function r_get() {\n"
-  "ajax('GET','/api/r',null);\n"
-"}\n"
-"</script>\n"
-
-"<div class=\"content\">\n"
-  "<ul id=\"r\">\n"
-  "</ul>\n"
-  "<hr/><p class=\"small\">Relenet "_VERSION"</p>\n"
-"</div>\n"
-
-"<script>\n"
-  "r_get();\n"
+"ajax('GET','/api/r',null);\n"
 "</script>\n"
 
 "</body>\n"
@@ -414,7 +383,34 @@ void RelayStateChangeCtrl::execute(WebDispatcher &webDispatcher, WebRequest &req
 			err=3;//todo: corrigir codigo de erro
 		}
 	} // if POST
-	sendJsonViaWeb(webDispatcher, request,err,printJsonRelayStatus);
+	sendJsonViaWeb(webDispatcher, request,err,printJsonRelays);
+}
+
+void RelayController::execute(WebDispatcher &webDispatcher, WebRequest &request) {
+#ifdef DEBUGGING
+	Serial.println(F("RelayCtrl"));
+#endif
+       	int err=0;
+        if (request.method==METHOD_POST) {
+	        char jsonStr[50];
+		if (webDispatcher.getNextLine(request.client,jsonStr,50)) {
+			#ifdef DEBUGGING
+				Serial.print(F("Processing relays: ")); Serial.println(jsonStr);
+			#endif
+	
+                        void *context;
+			if (pgm_read_byte(request.route.resource_P+5)=='r') {
+        			ChangeStatusRequest chgStatusReq;
+                                context = &chgStatusReq;
+                        } else {
+                        }
+			SmcfJsonDecoder jsonDecoder;
+			err=jsonDecoder.decode(jsonStr, jsonDecoderChangeStatus, &chgStatusReq);
+		} else {
+			err=3;//todo: corrigir codigo de erro
+		}
+	} // if POST
+	sendJsonViaWeb(webDispatcher, request,err,printJsonRelays);
 }
 
 /**
@@ -461,53 +457,32 @@ void RelayNameChangeCtrl::execute(WebDispatcher &webDispatcher, WebRequest &requ
 			int err=jsonDecoder.decode(jsonStr, jsonDecoderChangeName, &chgNameReq);
 		} else err=3; // não veio os dados do post. todo: corrigir o codigo de erro
 	}
-	sendJsonViaWeb(webDispatcher,request,err,printJsonRelayNames);
+	sendJsonViaWeb(webDispatcher,request,err,printJsonRelays);
 }
 
 /**
- * Returns a JSON with the current values of the relays to the client. The
- * JSON will look like: {"r":[0,0,0,0,0,0,0,0]}
- * This one means all releays are turned off.
+ * Returns a JSON with the current names e status of the relays to the client. The
+ * JSON will look like: [{"id":0,"n":"COZINHA","s":0},{"id":1,"n":"VARANDA","s":0}] ...
  */
-void printJsonRelayStatus(EthernetClient &client) {
+void printJsonRelays(EthernetClient &client) {
   #ifdef DEBUGGING
-    Serial.print(F("stat..."));
+    Serial.print(F("rns"));
   #endif
-	client.print(RS_START);
+	client.print('[');
 	for (int i = 0; i < NUM_RELAYS; i++) {
-              #ifdef DEBUGGING
-                Serial.print(F("-"));
-              #endif
 		if (i!=0) {
-			client.print(RS_SEP);
+			client.print(',');
 		}
+                client.print(F("{\"id\":"));
+                client.print(i);
+                client.print(F(",\"n\":\""));
+		char name[10];
+		relayService.getName(i,name);
+		client.print(name);
+		client.print(F("\",\"s\":"));
 		client.print(relayService.getStatus(i));
+		client.print('}');
 	}
-	client.println(RS_END);
+	client.println(']');
 }
 
-/**
- * Returns a JSON with the current values of the name of relays to the client. The
- * JSON will look like: ["COZINHA","VARANDA","TUG","QUARTO 1","QUARTO 2","SALA ESTAR","SALA JANTA","QUARTO 3"]
- * This one means all releays are turned off.
- */
-void printJsonRelayNames(EthernetClient &client) {
-  #ifdef DEBUGGING
-    Serial.print(F("names..."));
-  #endif
-	client.print(F("["));
-	for (uint8_t i = 0; i < NUM_RELAYS; i++) {
-              #ifdef DEBUGGING
-                Serial.print(F("-"));
-              #endif
-		if (i!=0) {
-			client.print(RS_SEP);
-		}
-		char dest[10];
-		relayService.getName(i,dest);
-		client.print('"');
-		client.print(dest);
-		client.print('"');
-	}
-	client.println(F("]"));
-}
