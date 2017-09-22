@@ -15,6 +15,14 @@ History:
 v. 0.2.1 - Original Nano_WebRelay8.ino (got from http://playground.arduino.cc/Code/NanoWebRelay8)
 v. 0.3 - Serves HTML Page for use in browsers (mobile compatible);
 
+Installing libraries (if you have not done yet):
+
+    C:\> cd [path to Arduino distribution]\libraries
+    C:\..\libraries> git clone https://github.com/ntruchsess/arduino_uip UIPEthernet
+    C:\..\libraries> git clone https://github.com/smarcelobr/arduino-SmcfJsonDecoder.git SmcfJsonDecoder
+    C:\..\libraries> git clone https://github.com/smarcelobr/arduino-WebMVC.git WebMVC
+
+
 Original comment (the same rights are applicable for this modified version):
 	Nano_WebRelay8.ino - Sketch for Arduino Nano with ATmega328 implementation to control
 	relays via HTTP requests.
@@ -108,10 +116,10 @@ Original comment (the same rights are applicable for this modified version):
 // decomment to enable debugging statements
 #define DEBUGGING;
 
-#define _VERSION "0.4"
+#define _VERSION "0.5"
 
 /*** The configuration of the application ***/
-int relayPins[NUM_RELAYS] PROGMEM = {2,3,4,5,6,7,8,9};
+const int relayPins[NUM_RELAYS] PROGMEM = {2,3,4,5,6,7,8,9};
 RelayService relayService(relayPins); // pin number each relay
 
 // the get requests the application is listening to
@@ -241,7 +249,7 @@ public:
 RedirectToViewCtrl redirectToHTMLCtrl(CONTENT_TYPE_HTML),redirectToJSONCtrl(CONTENT_TYPE_JSON);
 
 #define NUM_ROUTES 4
-WebRoute routes[ NUM_ROUTES ] PROGMEM = {
+const WebRoute routes[ NUM_ROUTES ] PROGMEM = {
   {RESOURCE_ABOUT,&redirectToJSONCtrl,VIEW_ABOUT},
   {RESOURCE_STATE,&relayStateChangeCtrl,NULL},
   {RESOURCE_NAME,&relayNameChangeCtrl,NULL},
@@ -291,7 +299,7 @@ void setup() {
            }
            Serial.println();
           // grava na eeprom
-          //EE_saveMAC(mac);
+          EE_saveMAC(mac);
         }
 	if (!EE_getIP(ip)) {;
           // Change the configuration for your needs
