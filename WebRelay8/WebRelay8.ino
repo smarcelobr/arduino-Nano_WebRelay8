@@ -394,33 +394,6 @@ void RelayStateChangeCtrl::execute(WebDispatcher &webDispatcher, WebRequest &req
 	sendJsonViaWeb(webDispatcher, request,err,printJsonRelays);
 }
 
-void RelayController::execute(WebDispatcher &webDispatcher, WebRequest &request) {
-#ifdef DEBUGGING
-	Serial.println(F("RelayCtrl"));
-#endif
-       	int err=0;
-        if (request.method==METHOD_POST) {
-	        char jsonStr[50];
-		if (webDispatcher.getNextLine(request.client,jsonStr,50)) {
-			#ifdef DEBUGGING
-				Serial.print(F("Processing relays: ")); Serial.println(jsonStr);
-			#endif
-	
-                        void *context;
-			if (pgm_read_byte(request.route.resource_P+5)=='r') {
-        			ChangeStatusRequest chgStatusReq;
-                                context = &chgStatusReq;
-                        } else {
-                        }
-			SmcfJsonDecoder jsonDecoder;
-			err=jsonDecoder.decode(jsonStr, jsonDecoderChangeStatus, &chgStatusReq);
-		} else {
-			err=3;//todo: corrigir codigo de erro
-		}
-	} // if POST
-	sendJsonViaWeb(webDispatcher, request,err,printJsonRelays);
-}
-
 /**
  * callback for jsonparse when changename.
  * Se retornar qualquer coisa diferente de 0, para o processamento e retorna na hora.

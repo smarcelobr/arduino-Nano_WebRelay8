@@ -38,12 +38,12 @@ typedef struct {
 class RelayService {
 private:
   // Output ports for relays, change it if you connected other pins, must be adjusted if number of relays changed
-  int *outputPorts_P;
+  const int *outputPorts_P;
   // this is for performance, must be adjusted if number of relays changed
   boolean portStatus[NUM_RELAYS];
 
 public:
-  RelayService(int pins_P[NUM_RELAYS]);
+  RelayService(const int pins_P[NUM_RELAYS]);
   boolean getStatus(uint8_t numRelay) const;
   void getName(uint8_t numRelay,char dest[10]) const;
   uint8_t changeStatus(ChangeStatusRequest &chgStatReq);

@@ -1,5 +1,5 @@
 
-RelayService::RelayService(int pins_P[NUM_RELAYS]):outputPorts_P(pins_P) {
+RelayService::RelayService(const int pins_P[NUM_RELAYS]):outputPorts_P(pins_P) {
 	// all pins will be turned off
 	for (int i = 0; i < NUM_RELAYS; i++) {
                 int pin = pgm_read_byte(&outputPorts_P[i]);
